@@ -7,6 +7,8 @@ open System.Drawing
 open System.Drawing.Drawing2D
 open System.Windows.Forms
 
+type ArcAutomaton = Click1 | Click2 | Nothing
+
 type WVMatrix() =
   let wv = new Drawing2D.Matrix()
   let vw = new Drawing2D.Matrix()
@@ -96,6 +98,7 @@ type LWCControl() =
   member this.ClientSizeInt = Size(int size.Width, int size.Height)
   member this.Left = pos.X
   member this.Top = pos.Y
+  
   member this.Width
     with get () = size.Width
     and set (w) = size.Width <- w
@@ -153,6 +156,53 @@ and LWCNode() =
     let distance = Math.Sqrt(Math.Pow(float pt.X - this.Radius, 2.0) + Math.Pow(float pt.Y - this.Radius, 2.0))
     distance < float this.Radius
 
+and LWCArc() =
+  inherit LWCControl()
+  
+  let mutable startOffset = None
+  let mutable endP = PointF()
+  
+  override this.OnPaint(e) =
+    let g = e.Graphics
+    let pen = new Pen(Color.Red,5.f)
+    //g.FillRectangle(Brushes.Black, 0.f, 0.f, this.Width, this.Height)
+    g.DrawLine(pen, 0.f, pen.Width, this.Width, pen.Width)
+    
+  
+  override this.OnMouseDown(e) =
+    match startOffset with
+      | None ->
+        startOffset <- Some((PointF(single e.Location.X, single e.Location.Y)))
+      | Some c -> ()
+    printfn "NODE %A" e.Location
+  
+  override this.OnMouseMove(e) =
+    printfn "MOUSE MOVE %A" e.Location
+    match startOffset with
+      | Some c ->
+        let currPoint = (*c.WV.TransformPointW*)(PointF(single e.Location.X + this.Left, single e.Location.Y + this.Top))
+        printfn "CURR POINT %A  %A %A %A" currPoint.X currPoint.Y this.Left this.Top
+        let newP = PointF(currPoint.X - c.X, currPoint.Y - c.Y)
+        this.Position <- PointF (newP.X , newP.Y )
+      | None -> ()
+    this.Invalidate()
+  
+  override this.OnMouseUp(e) =
+    startOffset <- None
+    
+  
+    
+  member this.EndP 
+    with get() = endP
+    and set(p) = 
+      //this.WV.TranslateV(this.Position.X, this.Position.Y)
+      endP <- p
+      //this.WV.TranslateV(-this.Position.X, -this.Position.Y)
+      printfn "COORDINATES %A %A" endP.X endP.Y
+      this.Invalidate()
+      //endP <- p
+    
+  
 (*UI BUTTON*)
 and LWCButton() =
   inherit LWCControl()
@@ -195,7 +245,11 @@ and LWCircleButton() =
 and LWArcButton() =
   inherit LWCButton()
 
-  override this.Operation() = ()
+  override this.Operation() =
+    match this.Parent with
+      | Some p ->
+        p.ArcDrawing <- ArcAutomaton.Click1
+      | None -> ()
 
 
 
@@ -241,16 +295,36 @@ and LWRotateLButton() =
   override this.Operation() =
     printfn "ROTATE LEFT OPERATION"
     match this.Parent with
-      | Some p -> p.RotateControls(5)
+      | Some p -> p.RotateControls(5.f)
       | None -> ()
     this.Invalidate()
 and LWRotateRButton() =
   inherit LWCButton()
 
   override this.Operation() =
-    printfn "ROTATE LEFT OPERATION"
+    printfn "ROTATE RIGHT OPERATION"
     match this.Parent with
-      | Some p -> p.RotateControls(-5)
+      | Some p -> p.RotateControls(-5.f)
+      | None -> ()
+    this.Invalidate()
+    
+and LWZoomInButton() =
+  inherit LWCButton()
+
+  override this.Operation() =
+    printfn "ZOOM IN OPERATION"
+    match this.Parent with
+      | Some p -> p.ZoomControls(1.f/2.f)
+      | None -> ()
+    this.Invalidate()
+    
+and LWZoomOutButton() =
+  inherit LWCButton()
+
+  override this.Operation() =
+    printfn "ZOOM OUT OPERATION"
+    match this.Parent with
+      | Some p -> p.ZoomControls(2.f)
       | None -> ()
     this.Invalidate()
 
@@ -260,9 +334,15 @@ and LWCContainer() as this =
   inherit UserControl()
   // Matrice per traslare il mondo del grafo
   let lwUIControls = ResizeArray<LWCButton>()
-  let lwControls = ResizeArray<LWCNode>()
+  let lwControls = ResizeArray<LWCControl>()
   let mutable selected : LWCControl option = None
-
+  let mutable arcDrawing = ArcAutomaton.Nothing
+  let wv = WVMatrix()
+  
+  let mutable p1 : PointF option = None
+  let mutable p2 : PointF option = None
+  let mutable firstNode : LWCNode option = None
+  
   do
     this.DoubleBuffered <- true
 
@@ -270,6 +350,15 @@ and LWCContainer() as this =
     lwControls |> Seq.iter (fun c ->
       c.Position <- new PointF(c.Left + dx, c.Top + dy)
     )
+    
+  member this.ArcDrawing 
+    with get() = arcDrawing
+    and set(v) =
+      if(v = ArcAutomaton.Click1) then 
+        this.Cursor <- Cursors.Hand
+      else if( v = ArcAutomaton.Nothing) then
+        this.Cursor <- Cursors.Arrow
+      arcDrawing <- v
 
   member this.RotateControls(alpha) =
     lwControls |> Seq.iter (fun c ->
@@ -280,14 +369,26 @@ and LWCContainer() as this =
        c.WV.RotateV(float32 alpha)
        c.WV.TranslateV(-(posX), -(posY))
        ) //c.Position <- c.WV.TransformPointW(c.Position)
+       
+  member this.ZoomControls(zoom) =
+    wv.ScaleV(zoom,zoom)
+    lwControls |> Seq.iter (fun c ->
+      this.ZoomControl(c,zoom)
+    ) 
 
-
-
+  member this.ZoomControl(c,zoom) =
+    let posX = 250.f - c.Width / 2.f (*c.Left + float32 c.Radius*)
+    let posY = 250.f - c.Width / 2.f (* c.Top + float32 c.Radius*)
+    c.WV.TranslateV(posX, posY)
+    c.WV.ScaleV(zoom,zoom)
+    c.WV.TranslateV(-(posX), -(posY))
+    
   member this.AddUIControls(c : LWCButton) =
     lwUIControls.Add(c)
     c.Parent <- Some(this)
 
-  member this.AddControl(c) =
+  member this.AddControl(c:LWCControl) =
+    this.ZoomControl(c,wv.VW.Elements.[0])
     lwControls.Add(c)
     c.Parent <- Some(this)
 
@@ -296,6 +397,7 @@ and LWCContainer() as this =
     g.SmoothingMode <- SmoothingMode.HighQuality
     //TESTING
     g.DrawRectangle(Pens.Black, 0, 0, this.Width - 5, this.Height - 5)
+    g.DrawArc(Pens.Black,RectangleF(250.f-50.f,250.f-50.f,50.f,50.f),0.f,360.f)
     lwControls
     |> Seq.iter (fun c ->
       let bkg = e.Graphics.Save()
@@ -320,6 +422,11 @@ and LWCContainer() as this =
          e.Graphics.Transform <- c.WV.WV
          c.OnPaint(evt)
          e.Graphics.Restore(bkg))
+         
+    (*match (p1,p2) with
+      | Some(a),Some(b) ->
+        g.DrawLine(Pens.Red,a,b)
+      | _,_ -> ()*)
 
 
 
@@ -340,7 +447,7 @@ and LWCContainer() as this =
           let p = (*c.WV.TransformPointV*)(PointF(single e.X - c.Left, single e.Y - c.Top))
           let evt = new MouseEventArgs(e.Button, e.Clicks, int p.X, int p.Y, e.Delta)
           c.OnMouseDown(evt)
-          selected <- Some(c :> LWCControl)
+          selected <- Some(c)
           printfn "%A" selected.GetType
         | None -> ()
 
@@ -361,6 +468,52 @@ and LWCContainer() as this =
         c.OnMouseUp(e)
         selected <- None
       | None -> ()
+      
+      
+  
+  
+  override this.OnMouseClick(e) =
+    match arcDrawing with
+      | ArcAutomaton.Click1 ->
+        let o = lwControls |> Seq.tryFindBack (fun c -> c.HitTest(e.Location))
+        match o with
+          | Some(:? LWCNode as c) -> 
+            printfn "CLICK1"
+            (*let mutable posX = c.Position.X + float32 c.Radius
+            let mutable posY = c.Position.Y + float32 c.Radius*)
+            p1 <- Some((PointF(c.Position.X + float32 c.Radius, c.Position.Y + float32 c.Radius)))
+            firstNode <- Some(c)
+            this.ArcDrawing <- ArcAutomaton.Click2
+          | None | Some _ -> 
+            firstNode <- None
+            p1 <- None
+            this.ArcDrawing <- ArcAutomaton.Nothing
+      
+      | ArcAutomaton.Click2 ->
+        let o = lwControls |> Seq.tryFindBack (fun c -> c.HitTest(e.Location))
+        match o with
+          | Some(:? LWCNode as c) when c <> firstNode.Value -> 
+            printfn "CLICK2"
+            p2 <- Some((PointF(c.Position.X + float32 c.Radius, c.Position.Y + float32 c.Radius)))
+            let angle = Math.Atan2((float(p2.Value.Y - p1.Value.Y)) , float(p2.Value.X - p1.Value.X)) * 180.0 / Math.PI
+            printfn "ANGLE %A " angle
+            //if(angle = Nan)
+            let ipo = float32 (Math.Sqrt(Math.Pow(float(p2.Value.X - p1.Value.X),2.0) + Math.Pow(float(p2.Value.Y - p1.Value.Y),2.0)))
+            let arc = new LWCArc(Position = p1.Value, ClientSize = SizeF(ipo, 10.f),EndP = p2.Value)
+            arc.WV.TranslateV(p1.Value.X, p1.Value.Y)
+            arc.WV.RotateV(float32 -angle)
+            arc.WV.TranslateV(-(p1.Value.X), -(p1.Value.Y))
+            this.AddControl(arc)
+            this.Invalidate()
+          | None | Some _ -> ()
+            
+        firstNode <- None
+        p1 <- None
+        p2 <- None
+        this.ArcDrawing <- ArcAutomaton.Nothing
+      | _ -> ()
+    
+      
 
 
 let f = new Form(TopMost = true, Size = Size(500, 500))
@@ -368,6 +521,8 @@ let container = new LWCContainer(Dock = DockStyle.Fill)
 let mutable offsetY = 0.f
 let circleButton = new LWCircleButton(Position = PointF(0.f, offsetY), ClientSize = SizeF(200.f, 30.f), Name = "Circle")
 offsetY <- offsetY + single circleButton.Font.Height
+let arcButton = new LWArcButton(Position = PointF(0.f, offsetY), ClientSize = SizeF(200.f, 30.f), Name = "Arc")
+offsetY <- offsetY + single arcButton.Font.Height
 let upButton =
   new LWUpButton(Position = PointF(0.f, offsetY), ClientSize = SizeF(20.f, 20.f), Name = "U")
 offsetY <- offsetY + single upButton.Font.Height
@@ -385,6 +540,12 @@ let rotateLButton =
 offsetY <- offsetY + single rotateLButton.Font.Height
 let rotateRButton =
   new LWRotateRButton(Position = PointF(0.f, offsetY), ClientSize = SizeF(20.f, 20.f), Name = "RR")
+offsetY <- offsetY + single rotateRButton.Font.Height
+let zoomInButton =
+  new LWZoomInButton(Position = PointF(0.f, offsetY), ClientSize = SizeF(20.f, 20.f), Name = "ZI")
+offsetY <- offsetY + single zoomInButton.Font.Height
+let zoomOutButton =
+  new LWZoomOutButton(Position = PointF(0.f, offsetY), ClientSize = SizeF(20.f, 20.f), Name = "ZO")
 
 container.AddUIControls(circleButton)
 container.AddUIControls(upButton)
@@ -393,6 +554,9 @@ container.AddUIControls(leftButton)
 container.AddUIControls(rightButton)
 container.AddUIControls(rotateLButton)
 container.AddUIControls(rotateRButton)
+container.AddUIControls(zoomInButton)
+container.AddUIControls(zoomOutButton)
+container.AddUIControls(arcButton)
 f.Controls.Add(container)
 f.Resize.Add(fun e -> container.Invalidate())
 f.Show()
