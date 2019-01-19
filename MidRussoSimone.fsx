@@ -80,14 +80,17 @@ type LWCControl() =
 
   member this.ClientSize
     with get () = size
-    and set (v) = size <- v //this.Invalidate()
+    and set (v) = 
+      size <- v 
+      this.Invalidate()
 
   member this.Position
     with get () = pos
     and set (v) =
       wv.TranslateV(pos.X, pos.Y)
       pos <- v
-      wv.TranslateV(-pos.X, -pos.Y) //this.Invalidate()
+      wv.TranslateV(-pos.X, -pos.Y) 
+      this.Invalidate()
 
   member this.PositionInt = Point(int pos.X, int pos.Y)
   member this.ClientSizeInt = Size(int size.Width, int size.Height)
@@ -135,8 +138,8 @@ and LWCNode() =
     printfn "MOUSE MOVE %A" e.Location
     match startOffset with
       | Some c ->
-        let currPoint = this.WV.TransformPointW(PointF(single e.Location.X, single e.Location.Y))
-        printfn "CURR POINT %A  %A" currPoint.X currPoint.Y
+        let currPoint = (*c.WV.TransformPointW*)(PointF(single e.Location.X + this.Left, single e.Location.Y + this.Top))
+        printfn "CURR POINT %A  %A %A %A" currPoint.X currPoint.Y this.Left this.Top
         let newP = PointF(currPoint.X - c.X, currPoint.Y - c.Y)
         this.Position <- PointF (newP.X , newP.Y )
       | None -> ()
@@ -270,9 +273,9 @@ and LWCContainer() as this =
 
   member this.RotateControls(alpha) =
     lwControls |> Seq.iter (fun c ->
-       let posX = 250.f (*c.Left + float32 c.Radius*)
-       let posY = 250.f (* c.Top + float32 c.Radius*)
-       c.Angle <- c.Angle + alpha
+       let posX = 250.f - c.Width / 2.f (*c.Left + float32 c.Radius*)
+       let posY = 250.f - c.Width / 2.f (* c.Top + float32 c.Radius*)
+       //c.Angle <- c.Angle + alpha
        c.WV.TranslateV(posX, posY)
        c.WV.RotateV(float32 alpha)
        c.WV.TranslateV(-(posX), -(posY))
@@ -334,7 +337,7 @@ and LWCContainer() as this =
       let o = lwControls |> Seq.tryFindBack (fun c -> c.HitTest(e.Location))
       match o with
         | Some c ->
-          let p = c.WV.TransformPointV(PointF(single e.X, single e.Y))
+          let p = (*c.WV.TransformPointV*)(PointF(single e.X - c.Left, single e.Y - c.Top))
           let evt = new MouseEventArgs(e.Button, e.Clicks, int p.X, int p.Y, e.Delta)
           c.OnMouseDown(evt)
           selected <- Some(c :> LWCControl)
@@ -345,7 +348,7 @@ and LWCContainer() as this =
     match selected with
       | Some c ->
         printfn "MAI MOUSE MOVE %A" e.Location
-        let p = c.WV.TransformPointV(PointF(single e.X, single e.Y))
+        let p = (*c.WV.TransformPointV*)PointF(single e.X - c.Left, single e.Y - c.Top)
         let evt = new MouseEventArgs(e.Button, e.Clicks, int p.X, int p.Y, e.Delta)
         c.OnMouseMove(evt)
       | None -> ()
