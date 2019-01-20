@@ -67,7 +67,12 @@ and  LWCControl() =
   let mutable parent : LWCContainer option = None
   let mutable name : String = "T"
   let mutable nameRect : RectangleF = RectangleF()
-  let mFont = new Font("Arial", 18.f)
+  let mutable mFont = new Font("Arial", 18.f)
+  let mutable moving = false
+  
+  member this.Moving 
+    with get() = moving
+    and set(v) = moving <- v
     
   member this.WV 
     with get() = wv
@@ -76,10 +81,13 @@ and  LWCControl() =
   member this.Name 
     with get() = name
     and set(v) = 
+      
       name <- v
       this.Invalidate()
   
-  member this.Font = mFont
+  member this.Font 
+    with get() = mFont
+    and set(v) = mFont <- v
   
   abstract OnPaint : PaintEventArgs -> unit
   override this.OnPaint(e) = ()
@@ -145,7 +153,7 @@ and  LWCControl() =
    (*NODE TYPE*)
 and LWCNode() =
   inherit LWCControl()
-
+  
   let mutable aangle = 0
   let mutable startOffset = None
   let arcs = ResizeArray<LWCArc>()
@@ -164,7 +172,8 @@ and LWCNode() =
     g.DrawEllipse(Pens.Black, 0.f, 0.f, this.Width, this.Height)
     let nameRect = Rectangle( int this.NameRect.X,int this.NameRect.Y, int this.NameRect.Width, int this.NameRect.Height)
     g.DrawRectangle(Pens.Black,nameRect)
-    g.DrawString(this.Name,this.Font,Brushes.Red,0.f,0.f)
+    let m = g.MeasureString(this.Name, this.Font)
+    g.DrawString(this.Name,this.Font,Brushes.Black,(this.Width - m.Width)/2.f,(this.Height - m.Height) / 2.f)
     
   
   (*member this.RotatePoint(x,y) =
@@ -178,6 +187,7 @@ and LWCNode() =
     printfn "NODE %A" e.Location
 
   override this.OnMouseMove(e) =
+    this.Moving <- true
     printfn "MOUSE MOVE %A" e.Location
     match startOffset with
       | Some c ->
@@ -190,13 +200,16 @@ and LWCNode() =
     this.Invalidate()
 
   override this.OnMouseUp(e) =
+    if(not this.Moving && this.NameRect.Contains(PointF(float32 e.Location.X, float32 e.Location.Y))) then 
+        printfn " DENTRO"
+        this.Parent.Value.ListenForName(this)
     match startOffset with
-      | Some _ -> startOffset <- None
+      | Some _ -> 
+        startOffset <- None
+        this.Moving <- false
       | None -> ()
     printfn " ON MOUSE UP %A" e.Location
-    if(this.NameRect.Contains(PointF(float32 e.Location.X, float32 e.Location.Y))) then 
-      printfn " DENTRO"
-      this.Parent.Value.ListenForName(this)
+    
    
 
   override this.HitTest(p) =
@@ -214,8 +227,9 @@ and LWCArc(nodes) as this =
   
   let mutable startOffset = None
   let mutable endP = PointF()
-  let pen = new Pen(Color.Red, this.Height)
+  let pen = new Pen(Color.LightBlue, this.Height)
   let nodes : NodePair = nodes
+      
   
   member this.Nodes = nodes
   
@@ -228,23 +242,26 @@ and LWCArc(nodes) as this =
     and set(v) =
       //this.Height <- v
       pen.Width <- v
+      this.Font <- new Font("Arial",pen.Width)
   
   override this.OnPaint(e) =
     let g = e.Graphics
     
     //g.FillRectangle(Brushes.Black, 0.f, 0.f, this.Width, this.Height)
     g.DrawLine(pen, 0.f, pen.Width, this.Width, pen.Width)
+    let m = g.MeasureString(this.Name, this.Font)
+    g.DrawString(this.Name,this.Font,Brushes.Black,(this.Width - m.Width)/2.f,(this.Height - m.Height) / 2.f)
     
   
-  override this.OnMouseDown(e) = 
-    match startOffset with
+  override this.OnMouseDown(e) = ()
+    (*match startOffset with
       | None ->
         startOffset <- Some((PointF(single e.Location.X, single e.Location.Y)))
       | Some c -> ()
-    printfn "NODE %A" e.Location
+    printfn "NODE %A" e.Location*)
   
-  override this.OnMouseMove(e) = 
-    printfn "MOUSE MOVE %A" e.Location
+  override this.OnMouseMove(e) = ()
+    (*printfn "MOUSE MOVE %A" e.Location
     match startOffset with
       | Some c ->
         let currPoint = (*c.WV.TransformPointW*)(PointF(single e.Location.X + this.Left, single e.Location.Y + this.Top))
@@ -252,10 +269,10 @@ and LWCArc(nodes) as this =
         let newP = PointF(currPoint.X - c.X, currPoint.Y - c.Y)
         this.Position <- PointF (newP.X , newP.Y )
       | None -> ()
-    this.Invalidate()
+    this.Invalidate()*)
   
   override this.OnMouseUp(e) = 
-    startOffset <- None
+    this.Parent.Value.ListenForName(this)
     
   member this.Move() =
     let startNode,endNode = 
@@ -451,9 +468,9 @@ and LWCContainer() as this =
       c.Position <- new PointF(c.Left + dx, c.Top + dy)
     )
     
-  member this.ListenForName(c) =
+  member this.ListenForName(c: LWCControl) =
     listeningForName <- true
-    listeningComponent <- Some (c:> LWCControl)
+    listeningComponent <- Some (c)
     
   member this.ArcDrawing 
     with get() = arcDrawing
