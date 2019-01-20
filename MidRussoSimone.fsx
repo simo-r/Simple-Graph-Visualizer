@@ -1,3 +1,5 @@
+open System.Windows.Forms
+
 open System.Numerics
 
 open System
@@ -55,18 +57,30 @@ type WVMatrix() =
     with get() = wv
     and set(v) = wv <- v
     
-type ArcInNode = LWCArc * bool
 
-and NodePair = LWCNode * LWCNode
+type NodePair = LWCNode * LWCNode
 
 and  LWCControl() =
   let mutable wv = WVMatrix()
   let mutable size = SizeF()
   let mutable pos = PointF()
   let mutable parent : LWCContainer option = None
+  let mutable name : String = "T"
+  let mutable nameRect : RectangleF = RectangleF()
+  let mFont = new Font("Arial", 18.f)
+    
   member this.WV 
     with get() = wv
     and set(v) = wv <- v
+    
+  member this.Name 
+    with get() = name
+    and set(v) = 
+      name <- v
+      this.Invalidate()
+  
+  member this.Font = mFont
+  
   abstract OnPaint : PaintEventArgs -> unit
   override this.OnPaint(e) = ()
   abstract OnMouseClick : MouseEventArgs -> unit
@@ -95,6 +109,7 @@ and  LWCControl() =
     with get () = size
     and set (v) = 
       size <- v 
+      nameRect <- RectangleF(0.f,size.Height / 2.f,size.Width, 10.f)
       //this.Invalidate()
 
   member this.Position
@@ -119,7 +134,13 @@ and  LWCControl() =
 
   member this.Parent
     with get () = parent
-    and set (v) = parent <- v
+    and set (v) = 
+      parent <- v
+      
+  member this.NameRect 
+    with get() = nameRect
+    
+      
 
    (*NODE TYPE*)
 and LWCNode() =
@@ -127,21 +148,23 @@ and LWCNode() =
 
   let mutable aangle = 0
   let mutable startOffset = None
-  let arcs = ResizeArray<ArcInNode>()
+  let arcs = ResizeArray<LWCArc>()
   
   member this.Radius = float (this.Width / 2.f)
   member this.Angle
     with get () = aangle
     and set (v) = aangle <- v
 
-  member this.AddArc(a,side) = 
-    let arcInNode = ArcInNode(a,side)
-    arcs.Add(arcInNode)
+  member this.AddArc(a) = 
+    arcs.Add(a)
     
   override this.OnPaint(e) =
     let g = e.Graphics
     g.DrawRectangle(Pens.Black, 0.f, 0.f, this.Width, this.Height)
     g.DrawEllipse(Pens.Black, 0.f, 0.f, this.Width, this.Height)
+    let nameRect = Rectangle( int this.NameRect.X,int this.NameRect.Y, int this.NameRect.Width, int this.NameRect.Height)
+    g.DrawRectangle(Pens.Black,nameRect)
+    g.DrawString(this.Name,this.Font,Brushes.Red,0.f,0.f)
     
   
   (*member this.RotatePoint(x,y) =
@@ -167,7 +190,14 @@ and LWCNode() =
     this.Invalidate()
 
   override this.OnMouseUp(e) =
-    startOffset <- None
+    match startOffset with
+      | Some _ -> startOffset <- None
+      | None -> ()
+    printfn " ON MOUSE UP %A" e.Location
+    if(this.NameRect.Contains(PointF(float32 e.Location.X, float32 e.Location.Y))) then 
+      printfn " DENTRO"
+      this.Parent.Value.ListenForName(this)
+   
 
   override this.HitTest(p) =
     let pt = this.WV.TransformPointV(PointF(single p.X, single p.Y))
@@ -175,13 +205,8 @@ and LWCNode() =
     distance < float this.Radius
     
   member this.MoveArcs() =
-    arcs |> Seq.iter( fun a ->
-      match a with
-        | (arc,true) -> 
-          printfn "LEFT ARC"
-          //arc.Position <- this.Position
-          arc.Move(this.WV.TransformPointW(PointF(float32 this.Radius,float32 this.Radius)),true)
-        | (arc,false) -> ()
+    arcs |> Seq.iter( fun arc ->
+      arc.Move()    
     )
 
 and LWCArc(nodes) as this =
@@ -192,7 +217,11 @@ and LWCArc(nodes) as this =
   let pen = new Pen(Color.Red, this.Height)
   let nodes : NodePair = nodes
   
+  member this.Nodes = nodes
   
+  member this.GetHalfWidth(p1:PointF,p2:PointF) =
+    float32 (Math.Sqrt(Math.Pow(float(p1.X -  p2.X),2.0)
+     + Math.Pow(float(p1.Y -  p2.Y),2.0) ) / 2.0)
   
   member this.PenWidth
     with get() = pen.Width
@@ -228,50 +257,26 @@ and LWCArc(nodes) as this =
   override this.OnMouseUp(e) = 
     startOffset <- None
     
-  member this.Move(p:PointF,side) =
-    if(side) then
-       let startNode,endNode = 
-        match nodes with
-          | l1,l2 ->l1, l2
-       let p1 = startNode.WV.TransformPointW(PointF(float32 startNode.Radius,float32 startNode.Radius))
-       let p2 = endNode.WV.TransformPointW(PointF(float32 endNode.Radius,float32 endNode.Radius))
-       let h = 5.f / this.Parent.Value.ScaleFactor//this.Parent.Value.WV.VW.Elements.[0]
-       let h2 = 10.f / this.Parent.Value.ScaleFactor
-       let angle = Math.Atan2((float(p2.Y - p1.Y)) , float(p2.X - p1.X)) * 180.0 / Math.PI
-       let ipo = float32 (Math.Sqrt(Math.Pow(float(p2.X - p1.X),2.0) + Math.Pow(float(p2.Y - p1.Y),2.0)))
-       let arc = new LWCArc(NodePair(startNode,endNode),Position = p1, ClientSize = SizeF(ipo, h2),EndP = p2, PenWidth = h)
-        
-       arc.WV.TranslateV(p1.X, p1.Y)
-       arc.WV.RotateV(float32 -angle)
-       arc.WV.TranslateV(-(p1.X), -(p1.Y))
-       this.WV <- arc.WV
-       this.Position <- arc.Position
-       this.ClientSize <- arc.ClientSize
-       this.EndP <- arc.EndP
-       this.PenWidth <- arc.PenWidth
-    else ()
-      //P2
-     (*//P1
-           let startNode,endNode = 
-             match nodes with
-               | l1,l2 ->l1, l2
-           //let pos = c.WV.TransformPointW(PointF(float32 c.Radius,float32 c.Radius))
-           this.WV <- new WVMatrix()
-           let p1 = startNode.WV.TransformPointW(PointF(float32 startNode.Radius,float32 startNode.Radius))
-           let p2 = endNode.WV.TransformPointW(PointF(float32 endNode.Radius,float32 endNode.Radius))
-          
-           let angle = Math.Atan2((float(p2.Y - p1.Y)) , float(p2.X - p1.X)) * 180.0 / Math.PI
-           let ipo = float32 (Math.Sqrt(Math.Pow(float(p2.X - p1.X),2.0) + Math.Pow(float(p2.Y - p1.Y),2.0)))
-           this.Position <- p1
-           this.EndP <- p2
-           this.ClientSize <- SizeF(ipo, this.Height)
-           printfn "PX %A PY %A " p1.X p1.Y
-           this.WV.TranslateV((*endP.X -*) p1.X,(*endP.Y *) p1.Y)
-           this.WV.RotateV(float32 (-angle(*+angle2*)))
-           this.WV.TranslateV(-(p1.X), -(p1.Y))*)
+  member this.Move() =
+    let startNode,endNode = 
+      match nodes with
+        | l1,l2 ->l1, l2
+    let p1 = startNode.WV.TransformPointW(PointF(float32 startNode.Radius,float32 startNode.Radius))
+    let p2 = endNode.WV.TransformPointW(PointF(float32 endNode.Radius,float32 endNode.Radius))
+    let h = 5.f / this.Parent.Value.ScaleFactor
+    let h2 = 10.f / this.Parent.Value.ScaleFactor
+    let angle = Math.Atan2((float(p2.Y - p1.Y)) , float(p2.X - p1.X)) * 180.0 / Math.PI
+    let ipo = float32 (Math.Sqrt(Math.Pow(float(p2.X - p1.X),2.0) + Math.Pow(float(p2.Y - p1.Y),2.0)))
+    let arc = new LWCArc(NodePair(startNode,endNode),Position = p1, ClientSize = SizeF(ipo, h2),EndP = p2, PenWidth = h)
+    arc.WV.TranslateV(p1.X, p1.Y)
+    arc.WV.RotateV(float32 -angle)
+    arc.WV.TranslateV(-(p1.X), -(p1.Y))
+    this.WV <- arc.WV
+    this.Position <- arc.Position
+    this.ClientSize <- arc.ClientSize
+    this.EndP <- arc.EndP
+    this.PenWidth <- arc.PenWidth
      
-     
-    
   member this.EndP 
     with get() = endP
     and set(p) = 
@@ -427,16 +432,16 @@ and LWCContainer() as this =
   let mutable arcDrawing = ArcAutomaton.Nothing
   let wv = WVMatrix()
   
-  
-  
   let mutable p1 : PointF option = None
   let mutable p2 : PointF option = None
   let mutable firstNode : LWCNode option = None
   let mutable killing = false
+  let mutable listeningForName = false 
+  let mutable listeningComponent : LWCControl option = None
+  let mutable listeningString = ""
   do
     this.DoubleBuffered <- true
-
- 
+    
     
   member this.ScaleFactor
     with get() = wv.VW.Elements.[0]
@@ -445,6 +450,10 @@ and LWCContainer() as this =
     lwControls |> Seq.iter (fun c ->
       c.Position <- new PointF(c.Left + dx, c.Top + dy)
     )
+    
+  member this.ListenForName(c) =
+    listeningForName <- true
+    listeningComponent <- Some (c:> LWCControl)
     
   member this.ArcDrawing 
     with get() = arcDrawing
@@ -466,9 +475,20 @@ and LWCContainer() as this =
 
   member this.RotateControls(alpha) =
     lwControls |> Seq.iter (fun c ->
-       let mutable posX = 250.f (*- c.Width * c.WV.VW.Elements.[0] / 2.f*)
-       let mutable posY = 250.f (*- c.Height * c.WV.VW.Elements.[0]/ 2.f*) 
-      
+       let mutable posX = 250.f(* - c.Width (** c.WV.VW.Elements.[0]*) / 2.f*)
+       let mutable posY = 250.f (*- c.Height (** c.WV.VW.Elements.[0]/ *) / 2.f *)
+       (*match c with
+        | (:? LWCNode as c) -> 
+          posX <- posX - c.Width (** c.WV.VW.Elements.[0]*) / 2.f
+          posY <- posY - c.Height (** c.WV.VW.Elements.[0]*) / 2.f
+        | (:? LWCArc as c) -> 
+          match c.Nodes with
+          | n1,n2 -> 
+            let halfW = c.GetHalfWidth(n1.WV.TransformPointW(PointF(float32 n1.Radius,float32 n1.Radius)),
+                          n2.WV.TransformPointW(PointF(float32 n2.Radius,float32 n2.Radius)))
+            posX <- posX + c.EndP.X - float32 halfW 
+            posY <- posY + c.EndP.Y - float32 halfW
+        | _ -> ()*)
        //c.Angle <- c.Angle + alpha
        c.WV.TranslateV(posX, posY)
        c.WV.RotateV(float32 alpha)
@@ -499,7 +519,7 @@ and LWCContainer() as this =
       | _ -> this.ZoomControl(c,wv.VW.Elements.[0])
     lwControls.Add(c)
     c.Parent <- Some(this)
-
+    
   override this.OnPaint(e) =
     let g = e.Graphics
     g.SmoothingMode <- SmoothingMode.HighQuality
@@ -573,8 +593,11 @@ and LWCContainer() as this =
   override this.OnMouseUp(e) =
     match selected with
       | Some c ->
-        // TODO MODIFICARE STO NOME
-        c.OnMouseUp(e)
+        // TODO MODIFICARE STO NOM
+        printfn " QUAAAAAAAAAAAAAAA"
+        let p = c.WV.TransformPointV(PointF(single e.X , single e.Y ))
+        let evt = new MouseEventArgs(e.Button, e.Clicks, int p.X, int p.Y, e.Delta)
+        c.OnMouseUp(evt)
         selected <- None
       | None -> ()
       
@@ -628,9 +651,9 @@ and LWCContainer() as this =
             printfn "ANGLE %A HEIGHT %A" angle h
             let ipo = float32 (Math.Sqrt(Math.Pow(float(p2.Value.X - p1.Value.X),2.0) + Math.Pow(float(p2.Value.Y - p1.Value.Y),2.0)))
             let arc = new LWCArc(NodePair(firstNode.Value,c),Position = p1.Value, ClientSize = SizeF(ipo, h2),EndP = p2.Value, PenWidth = h)
-            firstNode.Value.AddArc(arc,true)
+            firstNode.Value.AddArc(arc)
             
-            c.AddArc(arc,false)
+            c.AddArc(arc)
             arc.WV.TranslateV(p1.Value.X, p1.Value.Y)
             arc.WV.RotateV(float32 -angle)
             arc.WV.TranslateV(-(p1.Value.X), -(p1.Value.Y))
@@ -644,6 +667,16 @@ and LWCContainer() as this =
         p2 <- None
         this.ArcDrawing <- ArcAutomaton.Nothing
       | _ -> ()
+      
+    
+  override this.OnKeyPress(e) =
+    match listeningForName,listeningComponent with
+      | true, Some(c) ->
+        listeningForName <- false
+        c.Name <- e.KeyChar.ToString()
+      | _ -> ()
+    
+    
     
       
 
@@ -696,3 +729,4 @@ container.AddUIControls(killButton)
 f.Controls.Add(container)
 f.Resize.Add(fun e -> container.Invalidate())
 f.Show()
+
