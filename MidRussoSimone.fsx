@@ -168,10 +168,10 @@ and LWCNode() =
     
   override this.OnPaint(e) =
     let g = e.Graphics
-    g.DrawRectangle(Pens.Black, 0.f, 0.f, this.Width, this.Height)
+    //g.DrawRectangle(Pens.Black, 0.f, 0.f, this.Width, this.Height)
     g.DrawEllipse(Pens.Black, 0.f, 0.f, this.Width, this.Height)
     let nameRect = Rectangle( int this.NameRect.X,int this.NameRect.Y, int this.NameRect.Width, int this.NameRect.Height)
-    g.DrawRectangle(Pens.Black,nameRect)
+    //g.DrawRectangle(Pens.Black,nameRect)
     let m = g.MeasureString(this.Name, this.Font)
     g.DrawString(this.Name,this.Font,Brushes.Black,(this.Width - m.Width)/2.f,(this.Height - m.Height) / 2.f)
     
@@ -489,26 +489,13 @@ and LWCContainer() as this =
       killing <- v
 
   member this.RotateControls(alpha) =
+    let posX = float32 (this.Width / 2) //250.f
+    let posY = float32 (this.Height / 2) //250.f 
     lwControls |> Seq.iter (fun c ->
-       let mutable posX = 250.f(* - c.Width (** c.WV.VW.Elements.[0]*) / 2.f*)
-       let mutable posY = 250.f (*- c.Height (** c.WV.VW.Elements.[0]/ *) / 2.f *)
-       (*match c with
-        | (:? LWCNode as c) -> 
-          posX <- posX - c.Width (** c.WV.VW.Elements.[0]*) / 2.f
-          posY <- posY - c.Height (** c.WV.VW.Elements.[0]*) / 2.f
-        | (:? LWCArc as c) -> 
-          match c.Nodes with
-          | n1,n2 -> 
-            let halfW = c.GetHalfWidth(n1.WV.TransformPointW(PointF(float32 n1.Radius,float32 n1.Radius)),
-                          n2.WV.TransformPointW(PointF(float32 n2.Radius,float32 n2.Radius)))
-            posX <- posX + c.EndP.X - float32 halfW 
-            posY <- posY + c.EndP.Y - float32 halfW
-        | _ -> ()*)
-       //c.Angle <- c.Angle + alpha
-       c.WV.TranslateV(posX, posY)
-       c.WV.RotateV(float32 alpha)
-       c.WV.TranslateV(-(posX), -(posY))
-       ) //c.Position <- c.WV.TransformPointW(c.Position)
+      c.WV.TranslateV(posX, posY)
+      c.WV.RotateV(float32 alpha)
+      c.WV.TranslateV(-(posX), -(posY))
+    ) 
        
   member this.ZoomControls(zoom) =
     wv.ScaleV(zoom,zoom)
@@ -517,9 +504,9 @@ and LWCContainer() as this =
     ) 
 
   member this.ZoomControl(c,zoom) =
-    let mutable posX = 250.f (*- c.Width *c.WV.VW.Elements.[0] / 2.f *)
-    let mutable posY = 250.f (*- c.Height * c.WV.VW.Elements.[0] / 2.f *)
-   
+    let  posX = float32  (this.Width / 2) //250.f 
+    let  posY = float32 (this.Height / 2)//250.f 
+    
     c.WV.TranslateV(posX, posY)
     c.WV.ScaleV(zoom,zoom)
     c.WV.TranslateV(-(posX), -(posY))
@@ -539,8 +526,8 @@ and LWCContainer() as this =
     let g = e.Graphics
     g.SmoothingMode <- SmoothingMode.HighQuality
     //TESTING
-    g.DrawRectangle(Pens.Black, 0, 0, this.Width - 5, this.Height - 5)
-    g.DrawArc(Pens.Black,RectangleF(250.f-50.f,250.f-50.f,50.f,50.f),0.f,360.f)
+    //g.DrawRectangle(Pens.Black, 0, 0, this.Width - 5, this.Height - 5)
+    //g.DrawArc(Pens.Black,RectangleF(float32(this.Width / 2) - 50.f,float32(this.Height / 2)-50.f,50.f,50.f),0.f,360.f)
     lwControls
     |> Seq.iter (fun c ->
       let bkg = e.Graphics.Save()
@@ -549,7 +536,7 @@ and LWCContainer() as this =
       //bug: non supporta la rotazione
       e.Graphics.Transform <- c.WV.WV
       e.Graphics.SetClip (new RectangleF(PointF(-1.f, -1.f), SizeF(c.ClientSize.Width + 2.f, c.ClientSize.Height + 2.f)))
-      g.DrawRectangle (Pens.Red, Rectangle(Point(-1, -1), Size(int c.ClientSize.Width + 2, int c.ClientSize.Height + 2)))
+      //g.DrawRectangle (Pens.Red, Rectangle(Point(-1, -1), Size(int c.ClientSize.Width + 2, int c.ClientSize.Height + 2)))
       c.OnPaint(evt)
       e.Graphics.Restore(bkg))
     (*UI CONTROLS*)
@@ -742,6 +729,8 @@ container.AddUIControls(zoomOutButton)
 container.AddUIControls(arcButton)
 container.AddUIControls(killButton)
 f.Controls.Add(container)
-f.Resize.Add(fun e -> container.Invalidate())
+f.Resize.Add(fun e -> 
+  container.Invalidate()
+  )
 f.Show()
 
