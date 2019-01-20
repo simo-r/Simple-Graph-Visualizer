@@ -60,6 +60,8 @@ type WVMatrix() =
 
 type NodePair = LWCNode * LWCNode
 
+and NodeDepth = LWCNode * int
+
 and  LWCControl() =
   let mutable wv = WVMatrix()
   let mutable size = SizeF()
@@ -158,10 +160,16 @@ and LWCNode() =
   let mutable startOffset = None
   let arcs = ResizeArray<LWCArc>()
   
+  let mutable draggingOffset = PointF()
+  
   member this.Radius = float (this.Width / 2.f)
   member this.Angle
     with get () = aangle
     and set (v) = aangle <- v
+    
+  member this.DraggingOffset = draggingOffset
+    
+  member this.Arcs = arcs
 
   member this.AddArc(a) = 
     arcs.Add(a)
@@ -191,13 +199,34 @@ and LWCNode() =
     printfn "MOUSE MOVE %A" e.Location
     match startOffset with
       | Some c ->
+        // newP = + left + (moveOffSet  - starOffSet)
+        let offSet = PointF(float32 e.Location.X - c.X, float32 e.Location.Y - c.Y)
         let currPoint = (*c.WV.TransformPointW*)(PointF(single e.Location.X + this.Left, single e.Location.Y + this.Top))
-        printfn "CURR POINT %A  %A %A %A" currPoint.X currPoint.Y this.Left this.Top
         let newP = PointF(currPoint.X - c.X, currPoint.Y - c.Y)
         this.Position <- PointF (newP.X , newP.Y )
-        this.MoveArcs()
+        if(arcs.Count > 0) then
+          this.MoveArcs()
+          this.IncreaseDragOffset(offSet)
+          this.Parent.Value.Drag(this,offSet)
       | None -> ()
     this.Invalidate()
+    
+  member this.IncreaseDragOffset(offSet) =
+    draggingOffset <- PointF(draggingOffset.X + offSet.X, draggingOffset.Y + offSet.Y)
+    
+  member this.ElasticForward(offSet:PointF) =
+    this.IncreaseDragOffset(offSet)
+    this.Position <- PointF (this.Left + offSet.X, this.Top + offSet.Y)
+    this.MoveArcs()
+    
+  
+    
+  member this.ElasticBack(offSet:PointF,percentage) =
+    this.Position <- PointF (this.Left + offSet.X * percentage, this.Top + offSet.Y * percentage)
+    this.MoveArcs()
+  
+  member this.StopElasticBack() =
+    draggingOffset <- PointF()
 
   override this.OnMouseUp(e) =
     if(not this.Moving && this.NameRect.Contains(PointF(float32 e.Location.X, float32 e.Location.Y))) then 
@@ -207,6 +236,7 @@ and LWCNode() =
       | Some _ -> 
         startOffset <- None
         this.Moving <- false
+        this.Parent.Value.EnableElasticMovement()
       | None -> ()
     printfn " ON MOUSE UP %A" e.Location
     
@@ -454,7 +484,39 @@ and LWCContainer() as this =
   let mutable listeningForName = false 
   let mutable listeningComponent : LWCControl option = None
   let mutable listeningString = ""
+  
+  let mutable stop = false
+  let mutable nodeNum = 0
+  let timer = new Timer(Interval = 50,Enabled = false)
+  let mutable times = 0;
+  
+  let mutable elasticBack = false
+  
   do
+    timer.Tick.Add( fun a ->
+      lwControls |> Seq.iter( fun control ->
+        match control with
+          | (:? LWCNode as node) -> 
+            let dragOffSet = PointF(-node.DraggingOffset.X,-node.DraggingOffset.Y)
+            node.ElasticBack(dragOffSet,5.f/100.f)
+            node.Invalidate()
+            
+          | _ -> ()
+    
+      )
+      times <- times + 1
+      if(times = 20) then
+        times <- 0
+        lwControls |> Seq.iter( fun control ->
+          match control with
+            | (:? LWCNode as node) -> 
+              node.StopElasticBack()
+              
+            | _ -> ()
+        )
+        elasticBack <- false
+        timer.Stop()
+    )
     this.DoubleBuffered <- true
     
     
@@ -462,9 +524,10 @@ and LWCContainer() as this =
     with get() = wv.VW.Elements.[0]
 
   member this.TranslateControls(dx, dy) =
-    lwControls |> Seq.iter (fun c ->
-      c.Position <- new PointF(c.Left + dx, c.Top + dy)
-    )
+    if( not elasticBack) then
+      lwControls |> Seq.iter (fun c ->
+        c.Position <- new PointF(c.Left + dx, c.Top + dy)
+      )
     
   member this.ListenForName(c: LWCControl) =
     listeningForName <- true
@@ -489,34 +552,24 @@ and LWCContainer() as this =
       killing <- v
 
   member this.RotateControls(alpha) =
-    lwControls |> Seq.iter (fun c ->
-       let mutable posX = 250.f(* - c.Width (** c.WV.VW.Elements.[0]*) / 2.f*)
-       let mutable posY = 250.f (*- c.Height (** c.WV.VW.Elements.[0]/ *) / 2.f *)
-       (*match c with
-        | (:? LWCNode as c) -> 
-          posX <- posX - c.Width (** c.WV.VW.Elements.[0]*) / 2.f
-          posY <- posY - c.Height (** c.WV.VW.Elements.[0]*) / 2.f
-        | (:? LWCArc as c) -> 
-          match c.Nodes with
-          | n1,n2 -> 
-            let halfW = c.GetHalfWidth(n1.WV.TransformPointW(PointF(float32 n1.Radius,float32 n1.Radius)),
-                          n2.WV.TransformPointW(PointF(float32 n2.Radius,float32 n2.Radius)))
-            posX <- posX + c.EndP.X - float32 halfW 
-            posY <- posY + c.EndP.Y - float32 halfW
-        | _ -> ()*)
-       //c.Angle <- c.Angle + alpha
-       c.WV.TranslateV(posX, posY)
-       c.WV.RotateV(float32 alpha)
-       c.WV.TranslateV(-(posX), -(posY))
-       ) //c.Position <- c.WV.TransformPointW(c.Position)
+    if( not elasticBack) then
+      lwControls |> Seq.iter (fun c ->
+         let mutable posX = 250.f
+         let mutable posY = 250.f 
+         c.WV.TranslateV(posX, posY)
+         c.WV.RotateV(float32 alpha)
+         c.WV.TranslateV(-(posX), -(posY))
+         ) 
        
   member this.ZoomControls(zoom) =
-    wv.ScaleV(zoom,zoom)
-    lwControls |> Seq.iter (fun c ->
-      this.ZoomControl(c,zoom)
-    ) 
+    if( not elasticBack) then
+      wv.ScaleV(zoom,zoom)
+      lwControls |> Seq.iter (fun c ->
+        this.ZoomControl(c,zoom)
+      ) 
 
   member this.ZoomControl(c,zoom) =
+  
     let mutable posX = 250.f (*- c.Width *c.WV.VW.Elements.[0] / 2.f *)
     let mutable posY = 250.f (*- c.Height * c.WV.VW.Elements.[0] / 2.f *)
    
@@ -529,11 +582,14 @@ and LWCContainer() as this =
     c.Parent <- Some(this)
 
   member this.AddControl(c:LWCControl) =
-    match c with
-      | :? LWCArc as c-> ()
-      | _ -> this.ZoomControl(c,wv.VW.Elements.[0])
-    lwControls.Add(c)
-    c.Parent <- Some(this)
+    if( not elasticBack) then
+      match c with
+        | :? LWCArc as c-> ()
+        | _ -> 
+          nodeNum <- nodeNum + 1
+          this.ZoomControl(c,wv.VW.Elements.[0])
+      lwControls.Add(c)
+      c.Parent <- Some(this)
     
   override this.OnPaint(e) =
     let g = e.Graphics
@@ -620,7 +676,7 @@ and LWCContainer() as this =
   
   
   override this.OnMouseClick(e) =
-    if(killing) then
+    if(killing && not elasticBack) then
       let o = lwUIControls |> Seq.tryFindBack (fun c -> c.HitTest(e.Location))
       match o with
         | Some c-> ()
@@ -629,6 +685,11 @@ and LWCContainer() as this =
           match x with
             | Some c ->
               lwControls.Remove(c) |> ignore
+              match c with
+                | (:? LWCNode as node) ->
+                  //Rimuovi tutti gli archi
+                  nodeNum <- nodeNum - 1
+                | _ -> ()
               this.Invalidate() 
             | None -> ()
       this.Killing <- false 
@@ -690,7 +751,74 @@ and LWCContainer() as this =
         listeningForName <- false
         c.Name <- e.KeyChar.ToString()
       | _ -> ()
+      
+      
+  
     
+  member this.Drag(node,offSet) =
+      //draggingOffset <- PointF(draggingOffset.X + offSet.X,draggingOffset.Y + offSet.Y)
+      let mutable visited = 0
+      let mutable depth = 1
+      let nodeList : ResizeArray<NodeDepth> = ResizeArray<NodeDepth>()
+      nodeList.Add(NodeDepth(node,depth))
+      depth <- depth + 1
+      let mutable currNode = node
+      while visited < (nodeNum) && (visited < nodeList.Count) do //(
+        printfn "ZZ ENTER %A %A" visited nodeList.Count
+        match nodeList.[visited] with
+          | node, _ -> currNode <- node 
+        printfn "ZZ AFTER"
+        currNode.Arcs |> Seq.iter(fun a ->
+          match a.Nodes with
+            | a1,a2 ->
+              printfn "ZZ A1A2"
+              let mutable nnode = nodeList |> Seq.tryFind( fun nod ->
+                match nod with
+                  | n,_ -> n = a1)
+              match nnode with
+                | None ->
+                  printfn "ZZ ADD1"
+                  nodeList.Add(NodeDepth(a1,depth))
+                  //a1.ElasticForward(offSet)
+                | Some(n) ->
+                  nnode <- nodeList |> Seq.tryFind (fun nod -> 
+                    match nod with
+                      | n,_ -> n = a2
+                  )
+                  match nnode with
+                    | None -> 
+                      printfn "ZZ ADD2"
+                      nodeList.Add(NodeDepth(a2,depth))
+                    | Some(_) -> ()
+          
+        )
+        depth <- depth + 1
+        visited <- visited + 1
+        printfn " VISITED %A NODE NUM %A" visited nodeNum
+        
+      //)
+      nodeList |> Seq.iter( fun c ->
+        match c with
+          | n,d -> printfn "NODE  %A %A " n.Name d
+      )
+      nodeList.RemoveAt(0)
+      this.DragMove(nodeList,offSet)
+      
+        //visited++
+  member this.DragMove(nodeList,offSet) =
+    nodeList |> Seq.iter( fun nn -> 
+      match nn with
+        | node,depth ->
+          let scaledOffSet = PointF(offSet.X / float32 depth, offSet.Y /float32 depth)
+          node.ElasticForward(scaledOffSet)
+    )
+    
+  member this.EnableElasticMovement() =
+    elasticBack <- true
+    timer.Start()
+  
+  
+  
     
     
       
