@@ -53,8 +53,10 @@ type WVMatrix() =
   member this.WV 
     with get() = wv
     and set(v) = wv <- v
+    
+type ArcInNode = LWCArc * bool
 
-type LWCControl() =
+and  LWCControl() =
   let mutable wv = WVMatrix()
   let mutable size = SizeF()
   let mutable pos = PointF()
@@ -122,11 +124,17 @@ and LWCNode() =
 
   let mutable aangle = 0
   let mutable startOffset = None
+  let arcs = ResizeArray<ArcInNode>()
+  
   member this.Radius = float (this.Width / 2.f)
   member this.Angle
     with get () = aangle
     and set (v) = aangle <- v
 
+  member this.AddArc(a,side) = 
+    let arcInNode = ArcInNode(a,side)
+    arcs.Add(arcInNode)
+    
   override this.OnPaint(e) =
     let g = e.Graphics
     g.DrawRectangle(Pens.Black, 0.f, 0.f, this.Width, this.Height)
@@ -151,6 +159,7 @@ and LWCNode() =
         printfn "CURR POINT %A  %A %A %A" currPoint.X currPoint.Y this.Left this.Top
         let newP = PointF(currPoint.X - c.X, currPoint.Y - c.Y)
         this.Position <- PointF (newP.X , newP.Y )
+        this.MoveArcs()
       | None -> ()
     this.Invalidate()
 
@@ -161,28 +170,45 @@ and LWCNode() =
     let pt = this.WV.TransformPointV(PointF(single p.X, single p.Y))
     let distance = Math.Sqrt(Math.Pow(float pt.X - this.Radius, 2.0) + Math.Pow(float pt.Y - this.Radius, 2.0))
     distance < float this.Radius
+    
+  member this.MoveArcs() =
+    arcs |> Seq.iter( fun a ->
+      match a with
+        | (arc,true) -> 
+          printfn "LEFT ARC"
+          //arc.Position <- this.Position
+          //arc.Move(this.WV.TransformPointW(PointF(float32 this.Radius,float32 this.Radius)),true)
+        | (arc,false) -> ()
+    )
 
-and LWCArc() =
+and LWCArc() as this =
   inherit LWCControl()
   
   let mutable startOffset = None
   let mutable endP = PointF()
+  let pen = new Pen(Color.Red, this.Height)
+  
+  member this.PenWidth
+    with get() = pen.Width
+    and set(v) =
+      //this.Height <- v
+      pen.Width <- v
   
   override this.OnPaint(e) =
     let g = e.Graphics
-    let pen = new Pen(Color.Red,5.f)
+    
     //g.FillRectangle(Brushes.Black, 0.f, 0.f, this.Width, this.Height)
     g.DrawLine(pen, 0.f, pen.Width, this.Width, pen.Width)
     
   
-  override this.OnMouseDown(e) =
+  override this.OnMouseDown(e) = 
     match startOffset with
       | None ->
         startOffset <- Some((PointF(single e.Location.X, single e.Location.Y)))
       | Some c -> ()
     printfn "NODE %A" e.Location
   
-  override this.OnMouseMove(e) =
+  override this.OnMouseMove(e) = 
     printfn "MOUSE MOVE %A" e.Location
     match startOffset with
       | Some c ->
@@ -193,12 +219,32 @@ and LWCArc() =
       | None -> ()
     this.Invalidate()
   
-  override this.OnMouseUp(e) =
+  override this.OnMouseUp(e) = 
     startOffset <- None
     
-  
+  member this.Move(p:PointF,side) =
+    if(side) then
+      //P1
+      let mutable angle = Math.Atan2((float(endP.Y - this.Top)) , float(endP.X - this.Left)) * 180.0 / Math.PI
+      //let mutable ipo = float32 (Math.Sqrt(Math.Pow(float(endP.X - this.Left),2.0) + Math.Pow(float(endP.Y - this.Top),2.0)))
+      this.WV.TranslateV(this.Left,this.Top)
+      this.WV.RotateV(float32 angle)
+      this.WV.TranslateV(-(this.Left), -(this.Top))
+      angle <- Math.Atan2((float(endP.Y - p.Y)) , float(endP.X - p.X)) * 180.0 / Math.PI
+      let ipo = float32 (Math.Sqrt(Math.Pow(float(endP.X - p.X),2.0) + Math.Pow(float(endP.Y - p.Y),2.0)))
+      //this.WV <- new WVMatrix()
+      this.Position <- p
+      this.ClientSize <- SizeF(ipo, 10.f)
+      this.WV.TranslateV((*endP.X -*) p.X,(*endP.Y *) p.Y)
+      this.WV.RotateV(float32 -angle)
+      this.WV.TranslateV(-(p.X), -(p.Y))
+    else ()
+      //P2
+     
+     
+     
     
-  (*member this.EndP 
+  member this.EndP 
     with get() = endP
     and set(p) = 
       //this.WV.TranslateV(this.Position.X, this.Position.Y)
@@ -206,7 +252,7 @@ and LWCArc() =
       //this.WV.TranslateV(-this.Position.X, -this.Position.Y)
       printfn "COORDINATES %A %A" endP.X endP.Y
       this.Invalidate()
-      //endP <- p*)
+      //endP <- p
     
   
 (*UI BUTTON*)
@@ -528,8 +574,13 @@ and LWCContainer() as this =
             // 0 1 2
             // 3 4 5
             c.WV.VW.Elements |> Seq.iter(fun c -> printfn "CLICK1 %A" c)
-            let mutable posX = (*c.Position.X +*) c.WV.WV.Elements.[4](*+ float32 c.Radius*)
-            let mutable posY = (*c.Position.Y*) c.WV.WV.Elements.[5](*+ float32 c.Radius*)
+            let posss = c.WV.TransformPointW(PointF(float32 c.Radius,float32 c.Radius))
+            let mutable posX = (*c.Position.X +*) posss.X (*c.WV.WV.Elements.[4]* c.WV.WV.Elements.[0] + c.WV.WV.Elements.[5] * c.WV.WV.Elements.[1]*)(*+ float32 c.Radius*)
+            let mutable posY = (*c.Position.Y*) posss.Y (*c.WV.WV.Elements.[4] * c.WV.WV.Elements.[2] + c.WV.WV.Elements.[5] * c.WV.WV.Elements.[3]*)(*+ float32 c.Radius*)
+            printfn "PRIMO PUNTO %A" (c.WV.TransformPointW(PointF(0.f,0.f)))
+            printfn "SECONDO PUNTO %A" (c.WV.TransformPointV(PointF(0.f,0.f)))
+            printfn "TERZO PUNTO %A" (c.WV.TransformPointW(c.Position))
+            printfn "QUARTO PUNTO %A" (c.WV.TransformPointV(c.Position))
             let r = float32 c.Radius
             let rRotatoX = r * wv.VW.Elements.[0] + r * wv.VW.Elements.[0] 
             let rRotatoY = r * wv.VW.Elements.[0] + r * wv.VW.Elements.[0]
@@ -549,28 +600,23 @@ and LWCContainer() as this =
           | Some(:? LWCNode as c) when c <> firstNode.Value -> 
             printfn "CLICK2"
             c.WV.VW.Elements |> Seq.iter(fun c -> printfn "CLICK1 %A" c)
-            let mutable posX = (*c.Position.X +*) c.WV.WV.Elements.[4](*+ float32 c.Radius*)
-            let mutable posY = (*c.Position.Y*) c.WV.WV.Elements.[5](*+ float32 c.Radius*)
-            let r = float32 c.Radius
-            //let rRotatoX = r * c.WV.VW.Elements.[0] + r * c.WV.VW.Elements.[1] 
-            //let rRotatoY = r * c.WV.VW.Elements.[2] + r * c.WV.VW.Elements.[3]
-            let rRotatoX = r * wv.VW.Elements.[0] + r * wv.VW.Elements.[0]
-            let rRotatoY = r * wv.VW.Elements.[0] + r * wv.VW.Elements.[0]
-            posX <- posX (*+ r*)
-            posY <- posY (*+ r*)
-            p2 <- Some((PointF(posX (*+ float32 c.Radius*), posY (*+ float32 c.Radius*))))
+            let pos = c.WV.TransformPointW(PointF(float32 c.Radius,float32 c.Radius))
+            let h = 5.f / wv.VW.Elements.[0]
+            let h2 = 10.f / wv.VW.Elements.[0]
+            p2 <- Some((PointF(pos.X , pos.Y)))
             let angle = Math.Atan2((float(p2.Value.Y - p1.Value.Y)) , float(p2.Value.X - p1.Value.X)) * 180.0 / Math.PI
-            printfn "ANGLE %A " angle
-            //if(angle = Nan)
+            printfn "ANGLE %A HEIGHT %A" angle h
             let ipo = float32 (Math.Sqrt(Math.Pow(float(p2.Value.X - p1.Value.X),2.0) + Math.Pow(float(p2.Value.Y - p1.Value.Y),2.0)))
-            let arc = new LWCArc(Position = p1.Value, ClientSize = SizeF(ipo, 10.f)(*,EndP = p2.Value*))
-            //arc.WV <- c.WV
+            let arc = new LWCArc(Position = p1.Value, ClientSize = SizeF(ipo, h2),EndP = p2.Value, PenWidth = h)
+            firstNode.Value.AddArc(arc,true)
+            c.AddArc(arc,false)
             arc.WV.TranslateV(p1.Value.X, p1.Value.Y)
             arc.WV.RotateV(float32 -angle)
             arc.WV.TranslateV(-(p1.Value.X), -(p1.Value.Y))
             this.AddControl(arc)
             this.Invalidate()
           | None | Some _ -> ()
+          
             
         firstNode <- None
         p1 <- None
